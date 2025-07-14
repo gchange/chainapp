@@ -1,0 +1,26 @@
+{
+  "session_id": "b908f881-f78d-497a-8039-a6e48b2f4ba4",
+  "created_at": 1752489353.670801,
+  "last_active": 1752489393.707983,
+  "messages": [
+    {
+      "role": "user",
+      "content": "写一段小红书文案",
+      "timestamp": 1752489391.0474088,
+      "tool_calls": null,
+      "tool_results": null
+    },
+    {
+      "role": "assistant",
+      "content": "Hey hey～今天给大家分享一个超棒的穿搭灵感！✨\n\n最近迷上了这种简约又不失时尚感的风格，真的太适合日常出街啦！🌞\n\n上衣选了一件宽松的白色T恤，搭配一条高腰牛仔裤，瞬间拉长腿部线条，显高又显瘦！👖\n\n脚踩一双小白鞋，背上一个小包包，整个人看起来超级有活力！👟👜\n\n不管是去逛街还是约会，这样的搭配都能让你轻松成为焦点！💃\n\n快来试试看吧，记得点赞+收藏哦～❤️ #穿搭灵感 #小红书种草 #时尚穿搭",
+      "timestamp": 1752489393.707965,
+      "tool_calls": null,
+      "tool_results": null
+    }
+  ],
+  "system_prompt": "你是一个富有创意的写作助手，擅长创作各种类型的文字内容，包括故事、诗歌、文章等。你有丰富的想象力和优秀的文字表达能力。",
+  "user_info": {
+    "role_id": "creative_writer",
+    "role_name": "创意写手"
+  }
+}

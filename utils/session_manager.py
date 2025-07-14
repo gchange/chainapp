@@ -20,10 +20,21 @@ class SessionManager:
         self.cleanup_expired_sessions()
         session_logger.info("会话管理器初始化完成")
     
-    def create_session(self, system_prompt: str = "", user_info: Optional[Dict[str, Any]] = None) -> str:
+    def create_session(self, system_prompt: str = "", role_id: Optional[str] = None, user_info: Optional[Dict[str, Any]] = None) -> str:
         """创建新会话"""
         session_id = str(uuid.uuid4())
         current_time = time.time()
+        
+        # 如果指定了角色ID，从角色管理器获取系统提示
+        if role_id:
+            from roles.role_manager import role_manager
+            role = role_manager.get_role(role_id)
+            if role:
+                system_prompt = role.system_prompt
+                if not user_info:
+                    user_info = {}
+                user_info["role_id"] = role_id
+                user_info["role_name"] = role.name
         
         session = ChatSession(
             session_id=session_id,
@@ -37,7 +48,7 @@ class SessionManager:
         # 保存到存储后端
         if storage_manager.save_session(session):
             self.sessions_cache[session_id] = session
-            session_logger.info(f"创建新会话: {session_id}")
+            session_logger.info(f"创建新会话: {session_id}, 角色: {role_id or '默认'}")
             return session_id
         else:
             session_logger.error(f"创建会话失败: {session_id}")

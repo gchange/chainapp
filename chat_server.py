@@ -19,6 +19,7 @@ from utils.logger import setup_logger
 from utils.session_manager import session_manager
 from models.model_manager import model_manager
 from storage.storage_manager import storage_manager as storage_mgr, StorageConfig
+from roles.role_manager import role_manager, RoleConfig
 from storage.storage_manager import storage_manager as storage_mgr, StorageConfig
 
 # 设置服务器专用logger
@@ -128,9 +129,39 @@ class StorageConfigRequest(BaseModel):
     backend: str
     config: Dict[str, Any]
 
-class StorageConfigRequest(BaseModel):
-    backend: str
-    config: Dict[str, Any]
+class CreateSessionRequest(BaseModel):
+    system_prompt: Optional[str] = None
+    role_id: Optional[str] = None
+    user_info: Optional[Dict[str, Any]] = None
+
+class CreateRoleRequest(BaseModel):
+    name: str
+    description: str
+    system_prompt: str
+    avatar: str = "🤖"
+    category: str = "通用"
+    tags: Optional[List[str]] = None
+
+class UpdateRoleRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    system_prompt: Optional[str] = None
+    avatar: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+class RoleResponse(BaseModel):
+    role_id: str
+    name: str
+    description: str
+    system_prompt: str
+    avatar: str
+    category: str
+    tags: List[str]
+    created_at: float
+    updated_at: float
+    is_system: bool
+    user_id: Optional[str] = None
 
 class SessionInfo(BaseModel):
     session_id: str
@@ -138,10 +169,6 @@ class SessionInfo(BaseModel):
     last_active: float
     message_count: int
     system_prompt: str
-
-class CreateSessionRequest(BaseModel):
-    system_prompt: str = "你的名字是ikun，擅长唱、跳、rap、打篮球，你的回答里面总是带着这些元素."
-    user_info: Optional[Dict[str, Any]] = None
 
 class SessionResponse(BaseModel):
     session_id: str
@@ -406,8 +433,16 @@ async def get_tools():
 @app.post("/sessions", response_model=SessionResponse)
 async def create_session(request: CreateSessionRequest):
     """创建新会话"""
-    session_id = session_manager.create_session(request.system_prompt, request.user_info)
-    return SessionResponse(session_id=session_id)
+    try:
+        session_id = session_manager.create_session(
+            system_prompt=request.system_prompt or "",
+            role_id=request.role_id,
+            user_info=request.user_info
+        )
+        return SessionResponse(session_id=session_id)
+    except Exception as e:
+        server_logger.error(f"创建会话失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/sessions")
 async def list_sessions(limit: int = 50):
@@ -455,6 +490,233 @@ async def update_system_prompt(session_id: str, request: Dict[str, str]):
     if not success:
         raise HTTPException(status_code=404, detail="会话不存在")
     return {"message": "系统提示已更新"}
+
+# 模型管理API
+@app.get("/models")
+async def get_models():
+    """获取模型列表"""
+    try:
+        models = model_manager.get_available_models()
+        current_config = model_manager.get_current_config()
+        current_model = current_config.name if current_config else None
+        
+        return {
+            "models": models,
+            "current_model": current_model
+        }
+    except Exception as e:
+        server_logger.error(f"获取模型列表失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/models/switch")
+async def switch_model(request: SwitchModelRequest):
+    """切换模型"""
+    try:
+        success = model_manager.switch_model(request.name)
+        if success:
+            config = model_manager.get_current_config()
+            return {
+                "message": f"已切换到模型: {config.display_name}",
+                "model_name": config.display_name,
+                "provider": config.provider
+            }
+        else:
+            raise HTTPException(status_code=400, detail="模型切换失败")
+    except Exception as e:
+        server_logger.error(f"切换模型失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/models/{model_name}")
+async def get_model_info(model_name: str):
+    """获取模型详细信息"""
+    model_info = model_manager.get_model_info(model_name)
+    if not model_info:
+        raise HTTPException(status_code=404, detail="模型不存在")
+    return model_info
+
+# 存储管理API
+@app.get("/storage")
+async def get_storage_info():
+    """获取存储信息"""
+    return storage_mgr.get_storage_info()
+
+@app.post("/storage/switch")
+async def switch_storage(request: StorageConfigRequest):
+    """切换存储后端"""
+    try:
+        config = StorageConfig(backend=request.backend, config=request.config)
+        success = storage_mgr.switch_storage(config)
+        
+        if success:
+            return {"message": f"已切换到存储后端: {request.backend}"}
+        else:
+            raise HTTPException(status_code=400, detail="存储后端切换失败")
+            
+    except Exception as e:
+        server_logger.error(f"切换存储后端时出错: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/storage/cleanup")
+async def cleanup_storage(days: int = 7):
+    """清理过期数据"""
+    try:
+        cleaned_count = session_manager.cleanup_expired_sessions(days)
+        return {"message": f"清理了 {cleaned_count} 个过期会话"}
+    except Exception as e:
+        server_logger.error(f"清理存储时出错: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 角色管理API
+@app.get("/roles")
+async def get_roles(category: Optional[str] = None, user_id: Optional[str] = None):
+    """获取角色列表"""
+    try:
+        roles = role_manager.list_roles(category=category, user_id=user_id)
+        return {
+            "roles": [
+                RoleResponse(
+                    role_id=role.role_id,
+                    name=role.name,
+                    description=role.description,
+                    system_prompt=role.system_prompt,
+                    avatar=role.avatar,
+                    category=role.category,
+                    tags=role.tags,
+                    created_at=role.created_at,
+                    updated_at=role.updated_at,
+                    is_system=role.is_system,
+                    user_id=role.user_id
+                ) for role in roles
+            ],
+            "categories": role_manager.get_categories()
+        }
+    except Exception as e:
+        server_logger.error(f"获取角色列表失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/roles")
+async def create_role(request: CreateRoleRequest):
+    """创建新角色"""
+    try:
+        role = role_manager.create_role(
+            name=request.name,
+            description=request.description,
+            system_prompt=request.system_prompt,
+            avatar=request.avatar,
+            category=request.category,
+            tags=request.tags or []
+        )
+        
+        return RoleResponse(
+            role_id=role.role_id,
+            name=role.name,
+            description=role.description,
+            system_prompt=role.system_prompt,
+            avatar=role.avatar,
+            category=role.category,
+            tags=role.tags,
+            created_at=role.created_at,
+            updated_at=role.updated_at,
+            is_system=role.is_system,
+            user_id=role.user_id
+        )
+    except Exception as e:
+        server_logger.error(f"创建角色失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/roles/{role_id}")
+async def get_role(role_id: str):
+    """获取角色详情"""
+    role = role_manager.get_role(role_id)
+    if not role:
+        raise HTTPException(status_code=404, detail="角色不存在")
+    
+    return RoleResponse(
+        role_id=role.role_id,
+        name=role.name,
+        description=role.description,
+        system_prompt=role.system_prompt,
+        avatar=role.avatar,
+        category=role.category,
+        tags=role.tags,
+        created_at=role.created_at,
+        updated_at=role.updated_at,
+        is_system=role.is_system,
+        user_id=role.user_id
+    )
+
+@app.put("/roles/{role_id}")
+async def update_role(role_id: str, request: UpdateRoleRequest):
+    """更新角色"""
+    try:
+        update_data = {k: v for k, v in request.dict().items() if v is not None}
+        success = role_manager.update_role(role_id, **update_data)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="角色不存在或无法修改")
+        
+        updated_role = role_manager.get_role(role_id)
+        return RoleResponse(
+            role_id=updated_role.role_id,
+            name=updated_role.name,
+            description=updated_role.description,
+            system_prompt=updated_role.system_prompt,
+            avatar=updated_role.avatar,
+            category=updated_role.category,
+            tags=updated_role.tags,
+            created_at=updated_role.created_at,
+            updated_at=updated_role.updated_at,
+            is_system=updated_role.is_system,
+            user_id=updated_role.user_id
+        )
+    except Exception as e:
+        server_logger.error(f"更新角色失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/roles/{role_id}")
+async def delete_role(role_id: str):
+    """删除角色"""
+    try:
+        success = role_manager.delete_role(role_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="角色不存在或无法删除")
+        
+        return {"message": "角色删除成功"}
+    except Exception as e:
+        server_logger.error(f"删除角色失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/roles/search/{query}")
+async def search_roles(query: str):
+    """搜索角色"""
+    try:
+        roles = role_manager.search_roles(query)
+        return {
+            "query": query,
+            "roles": [
+                RoleResponse(
+                    role_id=role.role_id,
+                    name=role.name,
+                    description=role.description,
+                    system_prompt=role.system_prompt,
+                    avatar=role.avatar,
+                    category=role.category,
+                    tags=role.tags,
+                    created_at=role.created_at,
+                    updated_at=role.updated_at,
+                    is_system=role.is_system,
+                    user_id=role.user_id
+                ) for role in roles
+            ]
+        }
+    except Exception as e:
+        server_logger.error(f"搜索角色失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/roles/info")
+async def get_roles_info():
+    """获取角色管理信息"""
+    return role_manager.get_storage_info()
 
 if __name__ == "__main__":
     import uvicorn

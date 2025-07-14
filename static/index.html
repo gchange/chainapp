@@ -94,6 +94,180 @@
             white-space: nowrap;
         }
 
+        .current-role {
+            font-size: 10px;
+            opacity: 0.8;
+            background: rgba(255,255,255,0.15);
+            padding: 2px 6px;
+            border-radius: 8px;
+            max-width: 100px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: #fff;
+        }
+
+        .role-item {
+            padding: 12px;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .role-item:hover {
+            background: #f8f9fa;
+            border-color: #007bff;
+        }
+
+        .role-item.current {
+            background: #e3f2fd;
+            border-color: #2196f3;
+        }
+
+        .role-avatar {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+
+        .role-content {
+            flex: 1;
+        }
+
+        .role-name {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .role-category {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+
+        .role-description {
+            font-size: 11px;
+            color: #999;
+            margin-bottom: 6px;
+        }
+
+        .role-tags {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+
+        .role-tag {
+            font-size: 10px;
+            background: #f0f0f0;
+            color: #666;
+            padding: 2px 6px;
+            border-radius: 12px;
+        }
+
+        .role-category-filter {
+            margin-bottom: 15px;
+        }
+
+        .role-category-filter select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .current-role {
+            font-size: 10px;
+            opacity: 0.8;
+            background: rgba(255,255,255,0.15);
+            padding: 2px 6px;
+            border-radius: 8px;
+            max-width: 100px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: #fff;
+        }
+
+        .role-item {
+            padding: 12px;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .role-item:hover {
+            background: #f8f9fa;
+            border-color: #007bff;
+        }
+
+        .role-item.current {
+            background: #e3f2fd;
+            border-color: #2196f3;
+        }
+
+        .role-avatar {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+
+        .role-content {
+            flex: 1;
+        }
+
+        .role-name {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .role-category {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+
+        .role-description {
+            font-size: 11px;
+            color: #999;
+            margin-bottom: 6px;
+        }
+
+        .role-tags {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+
+        .role-tag {
+            font-size: 10px;
+            background: #f0f0f0;
+            color: #666;
+            padding: 2px 6px;
+            border-radius: 12px;
+        }
+
+        .role-category-filter {
+            margin-bottom: 15px;
+        }
+
+        .role-category-filter select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
         .model-item {
             padding: 12px;
             border: 1px solid #eee;
@@ -310,8 +484,10 @@
             <div class="session-controls">
                 <button id="newSessionBtn" class="session-btn">新会话</button>
                 <button id="sessionListBtn" class="session-btn">历史会话</button>
+                <button id="roleSelectBtn" class="session-btn">选择角色</button>
                 <button id="modelSelectBtn" class="session-btn">选择模型</button>
                 <span id="sessionId" class="session-id"></span>
+                <span id="currentRole" class="current-role"></span>
                 <span id="currentModel" class="current-model"></span>
             </div>
         </div>
@@ -344,6 +520,7 @@
         // 存储对话历史和会话信息
         let conversationHistory = [];
         let currentSessionId = null;
+        let currentRoleId = null;
         let useMemory = true;
 
         // 检查服务器状态
@@ -459,8 +636,59 @@
             }
         }
 
-        // 创建新会话
-        async function createNewSession() {
+        // 显示角色选择列表
+        async function showRoleSelection() {
+            try {
+                const response = await fetch(`${API_BASE}/roles`);
+                const data = await response.json();
+                
+                showModal('选择角色', createRoleListHTML(data.roles, data.categories));
+            } catch (error) {
+                console.error('获取角色列表失败:', error);
+            }
+        }
+
+        // 创建角色列表HTML
+        function createRoleListHTML(roles, categories) {
+            if (roles.length === 0) {
+                return '<p>暂无可用角色</p>';
+            }
+
+            let html = `
+                <div class="role-category-filter">
+                    <select onchange="filterRolesByCategory(this.value)">
+                        <option value="">所有分类</option>
+                        ${categories.map(cat => `<option value="${cat}">${cat}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="role-list" id="roleList">
+            `;
+            
+            roles.forEach(role => {
+                const isCurrent = role.role_id === currentRoleId;
+                const className = `role-item ${isCurrent ? 'current' : ''}`;
+                
+                html += `
+                    <div class="${className}" data-category="${role.category}" onclick="selectRole('${role.role_id}')">
+                        <div class="role-avatar">${role.avatar}</div>
+                        <div class="role-content">
+                            <div class="role-name">${role.name} ${isCurrent ? '(当前)' : ''}</div>
+                            <div class="role-category">${role.category}</div>
+                            <div class="role-description">${role.description}</div>
+                            <div class="role-tags">
+                                ${role.tags.map(tag => `<span class="role-tag">${tag}</span>`).join('')}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            
+            return html;
+        }
+
+        // 选择角色并创建新会话
+        async function selectRole(roleId) {
             try {
                 const response = await fetch(`${API_BASE}/sessions`, {
                     method: 'POST',
@@ -468,33 +696,56 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        system_prompt: "你的名字是ikun，擅长唱、跳、rap、打篮球，你的回答里面总是带着这些元素."
+                        role_id: roleId
                     })
                 });
 
                 if (response.ok) {
                     const result = await response.json();
                     currentSessionId = result.session_id;
+                    currentRoleId = roleId;
                     conversationHistory = [];
                     
-                    // 清空聊天界面
+                    // 获取角色信息
+                    const roleResponse = await fetch(`${API_BASE}/roles/${roleId}`);
+                    const roleData = await roleResponse.json();
+                    
+                    // 清空聊天界面并显示角色欢迎消息
                     chatMessages.innerHTML = `
                         <div class="message assistant">
                             <div class="message-content">
-                                你好！我是 iKun，一个会唱、跳、rap、篮球的智能助手！🎵🕺🎤🏀<br>
-                                我可以帮你进行数学计算、搜索信息等等。有什么问题尽管问我吧！
+                                ${roleData.avatar} 你好！我是 ${roleData.name}，${roleData.description}<br>
+                                有什么可以帮助你的吗？
                             </div>
                         </div>
                     `;
                     
                     updateSessionDisplay();
-                    console.log('创建新会话:', currentSessionId);
+                    updateRoleDisplay(roleData);
+                    closeModal();
+                    
                 } else {
                     console.error('创建会话失败:', response.statusText);
                 }
             } catch (error) {
-                console.error('创建会话出错:', error);
+                console.error('选择角色出错:', error);
             }
+        }
+
+        // 更新角色显示
+        function updateRoleDisplay(roleData) {
+            const currentRoleElement = document.getElementById('currentRole');
+            if (roleData) {
+                currentRoleElement.textContent = `${roleData.avatar} ${roleData.name}`;
+                currentRoleElement.title = roleData.description;
+            } else {
+                currentRoleElement.textContent = '默认';
+            }
+        }
+
+        // 创建新会话（使用默认角色）
+        async function createNewSession() {
+            await selectRole('default');
         }
 
         // 更新会话显示
@@ -758,6 +1009,18 @@
             }
         }
 
+        // 角色分类过滤
+        function filterRolesByCategory(category) {
+            const roleItems = document.querySelectorAll('.role-item');
+            roleItems.forEach(item => {
+                if (!category || item.dataset.category === category) {
+                    item.style.display = 'flex';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        }
+
         // 事件监听
         sendButton.addEventListener('click', sendMessage);
         messageInput.addEventListener('keypress', (e) => {
@@ -769,6 +1032,7 @@
 
         document.getElementById('newSessionBtn').addEventListener('click', createNewSession);
         document.getElementById('sessionListBtn').addEventListener('click', showSessionList);
+        document.getElementById('roleSelectBtn').addEventListener('click', showRoleSelection);
         document.getElementById('modelSelectBtn').addEventListener('click', showModelSelection);
 
         // 初始化
