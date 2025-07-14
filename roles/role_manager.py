@@ -26,6 +26,8 @@ class RoleConfig:
     updated_at: float = 0
     is_system: bool = False  # 是否为系统内置角色
     user_id: Optional[str] = None  # 创建者ID
+    default_model: Optional[str] = None  # 默认使用的模型名称
+    model_config: Optional[Dict[str, Any]] = None  # 模型特定配置
     
     def __post_init__(self):
         if self.tags is None:
@@ -34,6 +36,8 @@ class RoleConfig:
             self.created_at = time.time()
         if self.updated_at == 0:
             self.updated_at = time.time()
+        if self.model_config is None:
+            self.model_config = {}
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -374,7 +378,13 @@ class RoleManager:
                 avatar="🤖",
                 category="通用",
                 tags=["默认", "通用", "助手"],
-                is_system=True
+                is_system=True,
+                default_model="gpt-4o-mini",
+                model_config={
+                    "temperature": 0.7,
+                    "max_tokens": 4000,
+                    "top_p": 0.9
+                }
             ),
             RoleConfig(
                 role_id="ikun",
@@ -384,7 +394,13 @@ class RoleManager:
                 avatar="🏀",
                 category="娱乐",
                 tags=["iKun", "娱乐", "活泼", "篮球"],
-                is_system=True
+                is_system=True,
+                default_model="gpt-4o-mini",
+                model_config={
+                    "temperature": 0.9,
+                    "max_tokens": 3000,
+                    "top_p": 0.95
+                }
             ),
             RoleConfig(
                 role_id="programmer",
@@ -394,7 +410,13 @@ class RoleManager:
                 avatar="👨‍💻",
                 category="技术",
                 tags=["编程", "开发", "技术", "代码"],
-                is_system=True
+                is_system=True,
+                default_model="claude-3-5-sonnet-20241022",
+                model_config={
+                    "temperature": 0.3,
+                    "max_tokens": 8000,
+                    "top_p": 0.8
+                }
             ),
             RoleConfig(
                 role_id="translator",
@@ -404,7 +426,13 @@ class RoleManager:
                 avatar="🌍",
                 category="语言",
                 tags=["翻译", "语言", "多语言"],
-                is_system=True
+                is_system=True,
+                default_model="gpt-4o",
+                model_config={
+                    "temperature": 0.3,
+                    "max_tokens": 4000,
+                    "top_p": 0.8
+                }
             ),
             RoleConfig(
                 role_id="teacher",
@@ -414,7 +442,13 @@ class RoleManager:
                 avatar="👨‍🏫",
                 category="教育",
                 tags=["教学", "教育", "解释", "学习"],
-                is_system=True
+                is_system=True,
+                default_model="claude-3-5-sonnet-20241022",
+                model_config={
+                    "temperature": 0.5,
+                    "max_tokens": 6000,
+                    "top_p": 0.85
+                }
             ),
             RoleConfig(
                 role_id="creative_writer",
@@ -424,7 +458,13 @@ class RoleManager:
                 avatar="✍️",
                 category="创作",
                 tags=["写作", "创意", "文学", "创作"],
-                is_system=True
+                is_system=True,
+                default_model="claude-3-5-sonnet-20241022",
+                model_config={
+                    "temperature": 0.8,
+                    "max_tokens": 6000,
+                    "top_p": 0.9
+                }
             )
         ]
         
@@ -472,7 +512,9 @@ class RoleManager:
     
     def create_role(self, name: str, description: str, system_prompt: str, 
                    avatar: str = "🤖", category: str = "通用", 
-                   tags: List[str] = None, user_id: Optional[str] = None) -> RoleConfig:
+                   tags: List[str] = None, user_id: Optional[str] = None,
+                   default_model: Optional[str] = None,
+                   model_config: Optional[Dict[str, Any]] = None) -> RoleConfig:
         """创建新角色"""
         role_id = str(uuid.uuid4())
         role = RoleConfig(
@@ -484,7 +526,9 @@ class RoleManager:
             category=category,
             tags=tags or [],
             user_id=user_id,
-            is_system=False
+            is_system=False,
+            default_model=default_model,
+            model_config=model_config or {}
         )
         
         if self.save_role(role):
@@ -522,6 +566,20 @@ class RoleManager:
     def switch_storage(self, backend: str, config: Dict[str, Any]) -> bool:
         """切换存储后端"""
         return self.initialize_storage(backend, config)
+    
+    def get_role_recommended_model(self, role_id: str) -> Optional[str]:
+        """获取角色推荐的模型"""
+        role = self.get_role(role_id)
+        if role and role.default_model:
+            return role.default_model
+        return None
+    
+    def get_role_model_config(self, role_id: str) -> Dict[str, Any]:
+        """获取角色的模型配置"""
+        role = self.get_role(role_id)
+        if role and role.model_config:
+            return role.model_config
+        return {}
     
     def get_storage_info(self) -> Dict[str, Any]:
         """获取存储信息"""

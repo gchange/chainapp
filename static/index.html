@@ -667,6 +667,7 @@
             roles.forEach(role => {
                 const isCurrent = role.role_id === currentRoleId;
                 const className = `role-item ${isCurrent ? 'current' : ''}`;
+                const recommendedModel = role.default_model || '无';
                 
                 html += `
                     <div class="${className}" data-category="${role.category}" onclick="selectRole('${role.role_id}')">
@@ -675,6 +676,7 @@
                             <div class="role-name">${role.name} ${isCurrent ? '(当前)' : ''}</div>
                             <div class="role-category">${role.category}</div>
                             <div class="role-description">${role.description}</div>
+                            <div class="role-model">推荐模型: ${recommendedModel}</div>
                             <div class="role-tags">
                                 ${role.tags.map(tag => `<span class="role-tag">${tag}</span>`).join('')}
                             </div>

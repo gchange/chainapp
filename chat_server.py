@@ -141,6 +141,8 @@ class CreateRoleRequest(BaseModel):
     avatar: str = "🤖"
     category: str = "通用"
     tags: Optional[List[str]] = None
+    default_model: Optional[str] = None
+    llm_config: Optional[Dict[str, Any]] = None
 
 class UpdateRoleRequest(BaseModel):
     name: Optional[str] = None
@@ -149,6 +151,8 @@ class UpdateRoleRequest(BaseModel):
     avatar: Optional[str] = None
     category: Optional[str] = None
     tags: Optional[List[str]] = None
+    default_model: Optional[str] = None
+    llm_config: Optional[Dict[str, Any]] = None
 
 class RoleResponse(BaseModel):
     role_id: str
@@ -162,6 +166,8 @@ class RoleResponse(BaseModel):
     updated_at: float
     is_system: bool
     user_id: Optional[str] = None
+    default_model: Optional[str] = None
+    llm_config: Optional[Dict[str, Any]] = None
 
 class SessionInfo(BaseModel):
     session_id: str
@@ -434,12 +440,41 @@ async def get_tools():
 async def create_session(request: CreateSessionRequest):
     """创建新会话"""
     try:
+        # 如果指定了角色，获取角色信息和推荐模型
+        recommended_model = None
+        if request.role_id:
+            role = role_manager.get_role(request.role_id)
+            if role:
+                # 使用角色的system_prompt
+                if not request.system_prompt:
+                    request.system_prompt = role.system_prompt
+                
+                # 获取推荐模型
+                recommended_model = role.default_model
+                
+                # 如果角色有推荐模型且该模型可用，则切换到该模型
+                if recommended_model:
+                    try:
+                        available_models = [m["name"] for m in model_manager.get_available_models()]
+                        if recommended_model in available_models:
+                            current_model = model_manager.get_current_config()
+                            if not current_model or current_model.name != recommended_model:
+                                model_manager.switch_model(recommended_model)
+                                server_logger.info(f"为角色 {role.name} 切换到推荐模型: {recommended_model}")
+                    except Exception as e:
+                        server_logger.warning(f"切换到角色推荐模型失败: {e}")
+        
         session_id = session_manager.create_session(
             system_prompt=request.system_prompt or "",
             role_id=request.role_id,
             user_info=request.user_info
         )
-        return SessionResponse(session_id=session_id)
+        
+        response_data = {"session_id": session_id, "message": "会话创建成功"}
+        if recommended_model:
+            response_data["recommended_model"] = recommended_model
+            
+        return response_data
     except Exception as e:
         server_logger.error(f"创建会话失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -585,7 +620,9 @@ async def get_roles(category: Optional[str] = None, user_id: Optional[str] = Non
                     created_at=role.created_at,
                     updated_at=role.updated_at,
                     is_system=role.is_system,
-                    user_id=role.user_id
+                    user_id=role.user_id,
+                    default_model=role.default_model,
+                    llm_config=role.model_config
                 ) for role in roles
             ],
             "categories": role_manager.get_categories()
@@ -604,7 +641,9 @@ async def create_role(request: CreateRoleRequest):
             system_prompt=request.system_prompt,
             avatar=request.avatar,
             category=request.category,
-            tags=request.tags or []
+            tags=request.tags or [],
+            default_model=request.default_model,
+            model_config=request.llm_config
         )
         
         return RoleResponse(
@@ -618,7 +657,9 @@ async def create_role(request: CreateRoleRequest):
             created_at=role.created_at,
             updated_at=role.updated_at,
             is_system=role.is_system,
-            user_id=role.user_id
+            user_id=role.user_id,
+            default_model=role.default_model,
+            llm_config=role.model_config
         )
     except Exception as e:
         server_logger.error(f"创建角色失败: {e}")
@@ -642,14 +683,20 @@ async def get_role(role_id: str):
         created_at=role.created_at,
         updated_at=role.updated_at,
         is_system=role.is_system,
-        user_id=role.user_id
+        user_id=role.user_id,
+        default_model=role.default_model,
+        llm_config=role.model_config
     )
 
 @app.put("/roles/{role_id}")
 async def update_role(role_id: str, request: UpdateRoleRequest):
     """更新角色"""
     try:
+        # 将llm_config映射回model_config
         update_data = {k: v for k, v in request.dict().items() if v is not None}
+        if 'llm_config' in update_data:
+            update_data['model_config'] = update_data.pop('llm_config')
+            
         success = role_manager.update_role(role_id, **update_data)
         
         if not success:
@@ -667,7 +714,9 @@ async def update_role(role_id: str, request: UpdateRoleRequest):
             created_at=updated_role.created_at,
             updated_at=updated_role.updated_at,
             is_system=updated_role.is_system,
-            user_id=updated_role.user_id
+            user_id=updated_role.user_id,
+            default_model=updated_role.default_model,
+            llm_config=updated_role.model_config
         )
     except Exception as e:
         server_logger.error(f"更新角色失败: {e}")
@@ -705,12 +754,82 @@ async def search_roles(query: str):
                     created_at=role.created_at,
                     updated_at=role.updated_at,
                     is_system=role.is_system,
-                    user_id=role.user_id
+                    user_id=role.user_id,
+                    default_model=role.default_model,
+                    llm_config=role.model_config
                 ) for role in roles
             ]
         }
     except Exception as e:
         server_logger.error(f"搜索角色失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/roles/{role_id}/recommended-model")
+async def get_role_recommended_model(role_id: str):
+    """获取角色推荐的模型"""
+    try:
+        role = role_manager.get_role(role_id)
+        if not role:
+            raise HTTPException(status_code=404, detail="角色不存在")
+        
+        recommended_model = role.default_model
+        llm_config = role.model_config or {}
+        
+        # 检查推荐模型是否可用
+        is_available = False
+        model_info = None
+        if recommended_model:
+            available_models = model_manager.get_available_models()
+            for model in available_models:
+                if model["name"] == recommended_model:
+                    is_available = True
+                    model_info = model
+                    break
+        
+        return {
+            "role_id": role_id,
+            "role_name": role.name,
+            "recommended_model": recommended_model,
+            "llm_config": llm_config,
+            "is_available": is_available,
+            "model_info": model_info
+        }
+    except Exception as e:
+        server_logger.error(f"获取角色推荐模型失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/roles/{role_id}/switch-model")
+async def switch_to_role_model(role_id: str):
+    """切换到角色推荐的模型"""
+    try:
+        role = role_manager.get_role(role_id)
+        if not role:
+            raise HTTPException(status_code=404, detail="角色不存在")
+        
+        if not role.default_model:
+            raise HTTPException(status_code=400, detail="该角色没有推荐模型")
+        
+        # 检查模型是否可用
+        available_models = [m["name"] for m in model_manager.get_available_models()]
+        if role.default_model not in available_models:
+            raise HTTPException(status_code=400, detail="推荐模型不可用")
+        
+        # 切换模型
+        success = model_manager.switch_model(role.default_model)
+        if success:
+            config = model_manager.get_current_config()
+            return {
+                "message": f"已切换到角色 {role.name} 的推荐模型: {config.display_name}",
+                "role_name": role.name,
+                "model_name": config.display_name,
+                "provider": config.provider,
+                "llm_config": role.model_config
+            }
+        else:
+            raise HTTPException(status_code=500, detail="模型切换失败")
+            
+    except Exception as e:
+        server_logger.error(f"切换角色模型失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/roles/info")
