@@ -1,3 +1,7 @@
 langchain[openai]
 langchain_community
 dashscope
+ddgs
+fastapi
+uvicorn
+pydantic
