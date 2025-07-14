@@ -1,4 +1,4 @@
-g i!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -766,6 +766,10 @@ g i!DOCTYPE html>
                 sendMessage();
             }
         });
+
+        document.getElementById('newSessionBtn').addEventListener('click', createNewSession);
+        document.getElementById('sessionListBtn').addEventListener('click', showSessionList);
+        document.getElementById('modelSelectBtn').addEventListener('click', showModelSelection);
 
         // 初始化
         checkServerStatus();

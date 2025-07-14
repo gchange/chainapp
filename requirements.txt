@@ -7,3 +7,6 @@ fastapi
 uvicorn
 pydantic
 requests
+# 可选数据库依赖
+# pymongo  # for MongoDB support
+# sqlite3  # built-in with Python

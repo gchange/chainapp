@@ -18,6 +18,8 @@ from tools.tool_manager import create_tool_map, execute_tool_calls, get_all_tool
 from utils.logger import setup_logger
 from utils.session_manager import session_manager
 from models.model_manager import model_manager
+from storage.storage_manager import storage_manager as storage_mgr, StorageConfig
+from storage.storage_manager import storage_manager as storage_mgr, StorageConfig
 
 # 设置服务器专用logger
 server_logger = setup_logger("chat_server", log_file="chat_server.log")
@@ -121,6 +123,14 @@ class ServerStatus(BaseModel):
 
 class SwitchModelRequest(BaseModel):
     name: str
+
+class StorageConfigRequest(BaseModel):
+    backend: str
+    config: Dict[str, Any]
+
+class StorageConfigRequest(BaseModel):
+    backend: str
+    config: Dict[str, Any]
 
 class SessionInfo(BaseModel):
     session_id: str
