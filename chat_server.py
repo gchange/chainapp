@@ -14,13 +14,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 
-from tools.tool_manager import create_tool_map, execute_tool_calls, get_all_tools, get_tool_descriptions
+from tools.tool_manager import tool_manager, create_tool_map, execute_tool_calls, get_all_tools, get_tool_descriptions
 from utils.logger import setup_logger
 from utils.session_manager import session_manager
 from models.model_manager import model_manager
 from storage.storage_manager import storage_manager as storage_mgr, StorageConfig
 from roles.role_manager import role_manager, RoleConfig
 from storage.storage_manager import storage_manager as storage_mgr, StorageConfig
+from tools.role_tools import role_tool_manager
 
 # 设置服务器专用logger
 server_logger = setup_logger("chat_server", log_file="chat_server.log")
@@ -38,7 +39,7 @@ async def lifespan(app: FastAPI):
     
     try:
         # 初始化工具
-        tools = get_all_tools()
+        tools = tool_manager.get_available_tools()
         tool_map = create_tool_map(tools)
         server_logger.info(f"工具初始化成功，共加载 {len(tools)} 个工具")
         
@@ -320,10 +321,10 @@ async def get_status():
     """获取服务器状态"""
     global tool_map, tools
     
-    tool_descriptions = get_tool_descriptions()
+    tools = tool_manager.get_available_tools()
     available_tools = [
-        ToolInfo(name=name, description=desc)
-        for name, desc in tool_descriptions.items()
+        ToolInfo(name=tool["function"]["name"], description=tool["function"]["description"])
+        for tool in tools
     ]
     
     sessions = session_manager.list_sessions(limit=1000)
@@ -428,12 +429,11 @@ async def chat_endpoint(request: ChatRequest):
 @app.get("/tools")
 async def get_tools():
     """获取可用工具列表"""
-    tool_descriptions = get_tool_descriptions()
+    tools = tool_manager.get_available_tools()
     return {
-        "tools": [
-            {"name": name, "description": desc}
-            for name, desc in tool_descriptions.items()
-        ]
+        "tools": tools,
+        "tool_count": len(tools),
+        "categories": tool_manager.get_tool_categories()
     }
 
 @app.post("/sessions", response_model=SessionResponse)
@@ -830,6 +830,73 @@ async def switch_to_role_model(role_id: str):
             
     except Exception as e:
         server_logger.error(f"切换角色模型失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/roles/tools")
+async def get_role_tools():
+    """获取角色工具定义"""
+    try:
+        tools = role_tool_manager.get_role_tools()
+        return {
+            "tools": tools,
+            "tool_count": len(tools),
+            "message": "角色工具列表"
+        }
+    except Exception as e:
+        server_logger.error(f"获取角色工具失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/roles/tools/call")
+async def call_role_tool(request: Dict[str, Any]):
+    """直接调用角色工具"""
+    try:
+        function_name = request.get("function_name")
+        arguments = request.get("arguments", {})
+        
+        if not function_name:
+            raise HTTPException(status_code=400, detail="缺少function_name参数")
+        
+        result = role_tool_manager.call_role_function(function_name, arguments)
+        return result
+    except Exception as e:
+        server_logger.error(f"调用角色工具失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/roles/contexts/{user_id}")
+async def get_user_role_contexts(user_id: str):
+    """获取用户的角色上下文信息"""
+    try:
+        contexts = role_tool_manager.get_all_contexts_info(user_id)
+        return {
+            "user_id": user_id,
+            "contexts": contexts,
+            "context_count": len(contexts)
+        }
+    except Exception as e:
+        server_logger.error(f"获取用户角色上下文失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/roles/contexts/{user_id}/{role_id}")
+async def clear_role_context(user_id: str, role_id: str):
+    """清除指定用户的指定角色上下文"""
+    try:
+        success = role_tool_manager.clear_role_context(role_id, user_id)
+        if success:
+            return {"message": f"已清除用户 {user_id} 的角色 {role_id} 上下文"}
+        else:
+            raise HTTPException(status_code=404, detail="未找到指定的角色上下文")
+    except Exception as e:
+        server_logger.error(f"清除角色上下文失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/roles/contexts/{user_id}/{role_id}")
+async def get_role_context_info(user_id: str, role_id: str):
+    """获取特定角色的上下文信息"""
+    try:
+        context_info = role_tool_manager.get_role_context_info(role_id, user_id)
+        return context_info
+    except Exception as e:
+        server_logger.error(f"获取角色上下文信息失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/roles/info")

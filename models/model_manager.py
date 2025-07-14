@@ -131,6 +131,38 @@ class OllamaProvider(BaseModelProvider):
         except:
             return False
 
+class AnthropicProvider(BaseModelProvider):
+    """Anthropic Claude 模型提供者"""
+    
+    def create_model(self, config: ModelConfig) -> BaseChatModel:
+        """创建 Anthropic 模型 - 通过OpenAI兼容接口"""
+        try:
+            model_kwargs = {
+                "streaming": config.streaming,
+                "model": config.model_name,
+            }
+            
+            if config.max_tokens:
+                model_kwargs["max_tokens"] = config.max_tokens
+            if config.temperature is not None:
+                model_kwargs["temperature"] = config.temperature
+            if config.base_url:
+                model_kwargs["base_url"] = config.base_url
+            
+            api_key = os.getenv(config.api_key_env or "ANTHROPIC_API_KEY")
+            if api_key:
+                model_kwargs["api_key"] = api_key
+            
+            return ChatOpenAI(**model_kwargs)
+        except Exception as e:
+            model_logger.error(f"创建 Anthropic 模型失败: {e}")
+            raise
+    
+    def is_available(self, config: ModelConfig) -> bool:
+        """检查 Anthropic 是否可用"""
+        api_key = os.getenv(config.api_key_env or "ANTHROPIC_API_KEY")
+        return api_key is not None and api_key.strip() != ""
+
 class ModelManager:
     """模型管理器"""
     
@@ -139,6 +171,7 @@ class ModelManager:
             "tongyi": TongyiProvider(),
             "openai": OpenAIProvider(),
             "ollama": OllamaProvider(),
+            "anthropic": AnthropicProvider(),
         }
         
         self.model_configs: Dict[str, ModelConfig] = {
@@ -198,6 +231,34 @@ class ModelManager:
                 model_name="gpt-4-turbo-preview",
                 api_key_env="OPENAI_API_KEY",
                 description="OpenAI GPT-4 Turbo，最新版本，性能和能力平衡"
+            ),
+            "gpt-4o": ModelConfig(
+                name="gpt-4o",
+                display_name="GPT-4o",
+                provider="openai",
+                model_type="chat",
+                model_name="gpt-4o",
+                api_key_env="OPENAI_API_KEY",
+                description="OpenAI GPT-4o，多模态模型，支持图像和文本"
+            ),
+            "gpt-4o-mini": ModelConfig(
+                name="gpt-4o-mini",
+                display_name="GPT-4o Mini",
+                provider="openai",
+                model_type="chat",
+                model_name="gpt-4o-mini",
+                api_key_env="OPENAI_API_KEY",
+                description="OpenAI GPT-4o Mini，轻量版多模态模型"
+            ),
+            "claude-3-5-sonnet-20241022": ModelConfig(
+                name="claude-3-5-sonnet-20241022",
+                display_name="Claude 3.5 Sonnet",
+                provider="anthropic",
+                model_type="chat",
+                model_name="claude-3-5-sonnet-20241022",
+                api_key_env="ANTHROPIC_API_KEY",
+                base_url="https://api.anthropic.com/v1",
+                description="Anthropic Claude 3.5 Sonnet，优秀的推理和代码能力"
             ),
             
             # Ollama 本地模型
@@ -308,6 +369,35 @@ class ModelManager:
         except Exception as e:
             model_logger.error(f"添加自定义模型失败: {e}")
             return False
+    
+    def chat_with_model(self, messages: List[Dict[str, str]]) -> str:
+        """使用当前模型进行对话"""
+        if not self.current_model:
+            raise ValueError("没有可用的模型，请先加载模型")
+        
+        try:
+            # 转换消息格式
+            from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+            
+            langchain_messages = []
+            for msg in messages:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                
+                if role == "system":
+                    langchain_messages.append(SystemMessage(content=content))
+                elif role == "user":
+                    langchain_messages.append(HumanMessage(content=content))
+                elif role == "assistant":
+                    langchain_messages.append(AIMessage(content=content))
+            
+            # 调用模型
+            response = self.current_model.invoke(langchain_messages)
+            return response.content if hasattr(response, 'content') else str(response)
+            
+        except Exception as e:
+            model_logger.error(f"模型对话失败: {e}")
+            raise
     
     def get_model_info(self, model_name: str) -> Optional[Dict[str, Any]]:
         """获取模型信息"""
