@@ -4,7 +4,7 @@
 import json
 import asyncio
 import os
-from typing import List, Dict, Any, AsyncGenerator
+from typing import List, Dict, Any, AsyncGenerator, Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -17,6 +17,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, Tool
 
 from tools.tool_manager import create_tool_map, execute_tool_calls, get_all_tools, get_tool_descriptions
 from utils.logger import setup_logger
+from utils.session_manager import session_manager
 
 # 设置服务器专用logger
 server_logger = setup_logger("chat_server", log_file="chat_server.log")
@@ -84,9 +85,11 @@ class ChatMessage(BaseModel):
     content: str
 
 class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
+    messages: List[ChatMessage] = []  # 如果提供了session_id，这个可以为空
     stream: bool = True
     system_prompt: str = "你的名字是ikun，擅长唱、跳、rap、打篮球，你的回答里面总是带着这些元素."
+    session_id: Optional[str] = None
+    use_memory: bool = True
 
 class ChatResponse(BaseModel):
     message: ChatMessage
@@ -102,11 +105,37 @@ class ServerStatus(BaseModel):
     model_loaded: bool
     tools_count: int
     available_tools: List[ToolInfo]
+    session_count: int
 
-def convert_messages(chat_messages: List[ChatMessage], system_prompt: str) -> List:
+class SessionInfo(BaseModel):
+    session_id: str
+    created_at: float
+    last_active: float
+    message_count: int
+    system_prompt: str
+
+class CreateSessionRequest(BaseModel):
+    system_prompt: str = "你的名字是ikun，擅长唱、跳、rap、打篮球，你的回答里面总是带着这些元素."
+    user_info: Optional[Dict[str, Any]] = None
+
+class SessionResponse(BaseModel):
+    session_id: str
+    message: str = "会话创建成功"
+
+def convert_messages(chat_messages: List[ChatMessage], system_prompt: str, session_id: Optional[str] = None) -> List:
     """转换消息格式为 LangChain 格式"""
     messages = [SystemMessage(content=system_prompt)]
     
+    # 如果有会话ID，加载历史消息
+    if session_id:
+        historical_messages = session_manager.get_messages(session_id, limit=20)  # 最近20条消息
+        for hist_msg in historical_messages:
+            if hist_msg.role == "user":
+                messages.append(HumanMessage(content=hist_msg.content))
+            elif hist_msg.role == "assistant":
+                messages.append(AIMessage(content=hist_msg.content))
+    
+    # 添加当前消息
     for msg in chat_messages:
         if msg.role == "user":
             messages.append(HumanMessage(content=msg.content))
@@ -117,7 +146,7 @@ def convert_messages(chat_messages: List[ChatMessage], system_prompt: str) -> Li
     
     return messages
 
-async def process_streaming_response(messages: List, request_id: str) -> AsyncGenerator[str, None]:
+async def process_streaming_response(messages: List, request_id: str, session_id: Optional[str] = None) -> AsyncGenerator[str, None]:
     """处理流式响应"""
     server_logger.info(f"[{request_id}] 开始流式响应处理")
     
@@ -193,10 +222,15 @@ async def process_streaming_response(messages: List, request_id: str) -> AsyncGe
                             # 添加小延迟模拟真实流式效果
                             await asyncio.sleep(0.1)
                 
+                # 保存助手响应到会话
+                if session_id:
+                    session_manager.add_message(session_id, "assistant", result.content)
+                
                 # 发送结束标记
                 end_data = {
                     "type": "done",
-                    "finish_reason": "stop"
+                    "finish_reason": "stop",
+                    "session_id": session_id
                 }
                 yield f"data: {json.dumps(end_data, ensure_ascii=False)}\n\n"
                 break
@@ -230,11 +264,14 @@ async def get_status():
         for name, desc in tool_descriptions.items()
     ]
     
+    sessions = session_manager.list_sessions(limit=1000)
+    
     return ServerStatus(
         status="running",
         model_loaded=chat_llm is not None,
         tools_count=len(tools) if tools else 0,
-        available_tools=available_tools
+        available_tools=available_tools,
+        session_count=len(sessions)
     )
 
 @app.post("/chat")
@@ -244,22 +281,36 @@ async def chat_endpoint(request: ChatRequest):
         raise HTTPException(status_code=503, detail="聊天模型未初始化")
     
     request_id = f"req_{id(request)}"
-    server_logger.info(f"[{request_id}] 收到聊天请求，消息数: {len(request.messages)}")
+    server_logger.info(f"[{request_id}] 收到聊天请求，会话ID: {request.session_id}")
     
     try:
+        # 处理会话
+        session_id = request.session_id
+        if request.use_memory and not session_id:
+            # 创建新会话
+            session_id = session_manager.create_session(request.system_prompt)
+            server_logger.info(f"[{request_id}] 创建新会话: {session_id}")
+        
+        # 保存用户消息到会话
+        if session_id and request.messages:
+            for msg in request.messages:
+                if msg.role == "user":
+                    session_manager.add_message(session_id, msg.role, msg.content)
+        
         # 转换消息格式
-        messages = convert_messages(request.messages, request.system_prompt)
+        messages = convert_messages(request.messages, request.system_prompt, session_id if request.use_memory else None)
         
         if request.stream:
             # 流式响应
             server_logger.info(f"[{request_id}] 启用流式响应")
             return StreamingResponse(
-                process_streaming_response(messages, request_id),
+                process_streaming_response(messages, request_id, session_id),
                 media_type="text/plain",
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "Content-Type": "text/plain; charset=utf-8"
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "X-Session-ID": session_id or ""
                 }
             )
         else:
@@ -267,6 +318,16 @@ async def chat_endpoint(request: ChatRequest):
             server_logger.info(f"[{request_id}] 非流式响应")
             tool_chat = chat_llm.bind_tools(tools)
             result = tool_chat.invoke(messages)
+            
+            # 保存助手响应到会话
+            if session_id:
+                tool_calls_data = getattr(result, 'tool_calls', [])
+                session_manager.add_message(
+                    session_id, 
+                    "assistant", 
+                    result.content,
+                    tool_calls=tool_calls_data
+                )
             
             response = ChatResponse(
                 message=ChatMessage(role="assistant", content=result.content),
@@ -291,6 +352,59 @@ async def get_tools():
             for name, desc in tool_descriptions.items()
         ]
     }
+
+@app.post("/sessions", response_model=SessionResponse)
+async def create_session(request: CreateSessionRequest):
+    """创建新会话"""
+    session_id = session_manager.create_session(request.system_prompt, request.user_info)
+    return SessionResponse(session_id=session_id)
+
+@app.get("/sessions")
+async def list_sessions(limit: int = 50):
+    """获取会话列表"""
+    sessions = session_manager.list_sessions(limit)
+    return {"sessions": sessions}
+
+@app.get("/sessions/{session_id}")
+async def get_session(session_id: str):
+    """获取会话详情"""
+    session = session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    
+    return {
+        "session_id": session.session_id,
+        "created_at": session.created_at,
+        "last_active": session.last_active,
+        "system_prompt": session.system_prompt,
+        "messages": [
+            {
+                "role": msg.role,
+                "content": msg.content,
+                "timestamp": msg.timestamp,
+                "tool_calls": msg.tool_calls,
+                "tool_results": msg.tool_results
+            }
+            for msg in session.messages
+        ]
+    }
+
+@app.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """删除会话"""
+    success = session_manager.delete_session(session_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return {"message": "会话已删除"}
+
+@app.put("/sessions/{session_id}/system-prompt")
+async def update_system_prompt(session_id: str, request: Dict[str, str]):
+    """更新会话系统提示"""
+    system_prompt = request.get("system_prompt", "")
+    success = session_manager.update_system_prompt(session_id, system_prompt)
+    if not success:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return {"message": "系统提示已更新"}
 
 if __name__ == "__main__":
     import uvicorn

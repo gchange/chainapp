@@ -50,6 +50,90 @@
             opacity: 0.9;
         }
 
+        .session-controls {
+            margin-top: 10px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .session-btn {
+            padding: 5px 10px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 15px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.3s;
+        }
+
+        .session-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        .session-id {
+            font-size: 10px;
+            opacity: 0.7;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 20px;
+            border-radius: 10px;
+            width: 80%;
+            max-width: 600px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close:hover {
+            color: black;
+        }
+
+        .session-item {
+            padding: 10px;
+            border: 1px solid #eee;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .session-item:hover {
+            background: #f0f0f0;
+        }
+
+        .session-item.active {
+            background: #e3f2fd;
+            border-color: #2196f3;
+        }
+
         .chat-messages {
             flex: 1;
             padding: 20px;
@@ -169,6 +253,11 @@
         <div class="chat-header">
             <h1>🏀 iKun 智能助手</h1>
             <div class="status-info" id="statusInfo">连接中...</div>
+            <div class="session-controls">
+                <button id="newSessionBtn" class="session-btn">新会话</button>
+                <button id="sessionListBtn" class="session-btn">历史会话</button>
+                <span id="sessionId" class="session-id"></span>
+            </div>
         </div>
         
         <div class="chat-messages" id="chatMessages">
@@ -196,8 +285,10 @@
         const sendButton = document.getElementById('sendButton');
         const statusInfo = document.getElementById('statusInfo');
 
-        // 存储对话历史
+        // 存储对话历史和会话信息
         let conversationHistory = [];
+        let currentSessionId = null;
+        let useMemory = true;
 
         // 检查服务器状态
         async function checkServerStatus() {
@@ -206,7 +297,7 @@
                 const status = await response.json();
                 
                 if (status.status === 'running') {
-                    statusInfo.textContent = `服务正常 | 工具: ${status.tools_count}个`;
+                    statusInfo.textContent = `服务正常 | 工具: ${status.tools_count}个 | 会话: ${status.session_count}个`;
                     statusInfo.style.color = '#90ee90';
                 } else {
                     statusInfo.textContent = '服务异常';
@@ -217,6 +308,165 @@
                 statusInfo.style.color = '#ffcccb';
                 console.error('Status check failed:', error);
             }
+        }
+
+        // 创建新会话
+        async function createNewSession() {
+            try {
+                const response = await fetch(`${API_BASE}/sessions`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        system_prompt: "你的名字是ikun，擅长唱、跳、rap、打篮球，你的回答里面总是带着这些元素."
+                    })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    currentSessionId = result.session_id;
+                    conversationHistory = [];
+                    
+                    // 清空聊天界面
+                    chatMessages.innerHTML = `
+                        <div class="message assistant">
+                            <div class="message-content">
+                                你好！我是 iKun，一个会唱、跳、rap、篮球的智能助手！🎵🕺🎤🏀<br>
+                                我可以帮你进行数学计算、搜索信息等等。有什么问题尽管问我吧！
+                            </div>
+                        </div>
+                    `;
+                    
+                    updateSessionDisplay();
+                    console.log('创建新会话:', currentSessionId);
+                } else {
+                    console.error('创建会话失败:', response.statusText);
+                }
+            } catch (error) {
+                console.error('创建会话出错:', error);
+            }
+        }
+
+        // 更新会话显示
+        function updateSessionDisplay() {
+            const sessionIdElement = document.getElementById('sessionId');
+            if (currentSessionId) {
+                sessionIdElement.textContent = `会话: ${currentSessionId.substring(0, 8)}...`;
+            } else {
+                sessionIdElement.textContent = '无会话';
+            }
+        }
+
+        // 显示会话列表
+        async function showSessionList() {
+            try {
+                const response = await fetch(`${API_BASE}/sessions?limit=20`);
+                const data = await response.json();
+                
+                showModal('历史会话', createSessionListHTML(data.sessions));
+            } catch (error) {
+                console.error('获取会话列表失败:', error);
+            }
+        }
+
+        // 创建会话列表HTML
+        function createSessionListHTML(sessions) {
+            if (sessions.length === 0) {
+                return '<p>暂无历史会话</p>';
+            }
+
+            let html = '<div class="session-list">';
+            sessions.forEach(session => {
+                const date = new Date(session.last_active * 1000).toLocaleString();
+                const isActive = session.session_id === currentSessionId ? 'active' : '';
+                
+                html += `
+                    <div class="session-item ${isActive}" onclick="loadSession('${session.session_id}')">
+                        <div><strong>会话 ${session.session_id.substring(0, 8)}...</strong></div>
+                        <div style="font-size: 12px; color: #666;">
+                            消息数: ${session.message_count} | 最后活跃: ${date}
+                        </div>
+                        <div style="font-size: 11px; color: #999; margin-top: 5px;">
+                            ${session.system_prompt}
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            
+            return html;
+        }
+
+        // 加载会话
+        async function loadSession(sessionId) {
+            try {
+                const response = await fetch(`${API_BASE}/sessions/${sessionId}`);
+                if (!response.ok) {
+                    throw new Error('会话不存在');
+                }
+                
+                const sessionData = await response.json();
+                currentSessionId = sessionId;
+                
+                // 重建聊天历史
+                chatMessages.innerHTML = `
+                    <div class="message assistant">
+                        <div class="message-content">
+                            会话已加载！我是 iKun，准备继续我们的对话！🎵🕺🎤🏀
+                        </div>
+                    </div>
+                `;
+                
+                conversationHistory = [];
+                sessionData.messages.forEach(msg => {
+                    addMessage(msg.role, msg.content);
+                    conversationHistory.push({
+                        role: msg.role,
+                        content: msg.content
+                    });
+                });
+                
+                updateSessionDisplay();
+                closeModal();
+                console.log('加载会话:', sessionId);
+                
+            } catch (error) {
+                console.error('加载会话失败:', error);
+                alert('加载会话失败: ' + error.message);
+            }
+        }
+
+        // 显示模态框
+        function showModal(title, content) {
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.style.display = 'block';
+            
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <span class="close" onclick="closeModal()">&times;</span>
+                    <h2>${title}</h2>
+                    ${content}
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            // 点击外部关闭
+            modal.onclick = function(event) {
+                if (event.target === modal) {
+                    closeModal();
+                }
+            };
+        }
+
+        // 关闭模态框
+        function closeModal() {
+            const modals = document.querySelectorAll('.modal');
+            modals.forEach(modal => {
+                document.body.removeChild(modal);
+            });
         }
 
         // 添加消息到聊天界面
@@ -255,7 +505,9 @@
                     },
                     body: JSON.stringify({
                         messages: messages,
-                        stream: true
+                        stream: true,
+                        session_id: currentSessionId,
+                        use_memory: useMemory
                     })
                 });
 
@@ -300,6 +552,10 @@
                                     currentMessageDiv.innerHTML = currentContent.replace(/\n/g, '<br>');
                                 } else if (data.type === 'done') {
                                     console.log('Stream completed:', data.finish_reason);
+                                    if (data.session_id && !currentSessionId) {
+                                        currentSessionId = data.session_id;
+                                        updateSessionDisplay();
+                                    }
                                 } else if (data.type === 'error') {
                                     addMessage('assistant', `❌ 错误: ${data.error}`);
                                 }
