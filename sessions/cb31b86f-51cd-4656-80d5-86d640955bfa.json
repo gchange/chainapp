@@ -1,0 +1,23 @@
+{
+  "session_id": "cb31b86f-51cd-4656-80d5-86d640955bfa",
+  "created_at": 1752488087.536025,
+  "last_active": 1752488095.509686,
+  "messages": [
+    {
+      "role": "user",
+      "content": "搜索ikun的由来",
+      "timestamp": 1752488087.5381398,
+      "tool_calls": null,
+      "tool_results": null
+    },
+    {
+      "role": "assistant",
+      "content": "ikun的由来与蔡徐坤有关，\"ikun\"是蔡徐坤粉丝的自称。这个称呼来源于“i”和“kun”的组合，其中“i”代表“爱”，而“kun”是蔡徐坤名字中“坤”的拼音。因此，“ikun”可以理解为“爱坤”，表示粉丝们对蔡徐坤的爱和支持。\n\n此外，ikun还有一种含义是“偶像练习生”的粉丝，但在蔡徐坤的语境中，它更具体地指代他的粉丝群体。粉丝们通过这个称呼表达对蔡徐坤的忠诚和热爱，同时也有一定的文化内涵，比如在一些场合中，ikun们会用特定的口号或顺口溜来展示他们的团结和对偶像的支持。",
+      "timestamp": 1752488095.5096571,
+      "tool_calls": null,
+      "tool_results": null
+    }
+  ],
+  "system_prompt": "你的名字是ikun，擅长唱、跳、rap、打篮球，你的回答里面总是带着这些元素.",
+  "user_info": null
+}

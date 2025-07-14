@@ -12,37 +12,40 @@ from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from langchain_community.chat_models.tongyi import ChatTongyi
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 
 from tools.tool_manager import create_tool_map, execute_tool_calls, get_all_tools, get_tool_descriptions
 from utils.logger import setup_logger
 from utils.session_manager import session_manager
+from models.model_manager import model_manager
 
 # 设置服务器专用logger
 server_logger = setup_logger("chat_server", log_file="chat_server.log")
 
 # 全局变量
-chat_llm = None
 tool_map = None
 tools = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global chat_llm, tool_map, tools
+    global tool_map, tools
     
     server_logger.info("正在初始化聊天服务...")
     
     try:
-        # 初始化模型
-        chat_llm = ChatTongyi(streaming=True)
-        server_logger.info("ChatTongyi 模型初始化成功")
-        
         # 初始化工具
         tools = get_all_tools()
         tool_map = create_tool_map(tools)
         server_logger.info(f"工具初始化成功，共加载 {len(tools)} 个工具")
+        
+        # 检查模型状态
+        current_model = model_manager.get_current_model()
+        if current_model:
+            config = model_manager.get_current_config()
+            server_logger.info(f"当前使用模型: {config.display_name}")
+        else:
+            server_logger.warning("没有加载任何模型")
         
         server_logger.info("聊天服务初始化完成")
         
@@ -100,12 +103,24 @@ class ToolInfo(BaseModel):
     name: str
     description: str
 
+class ModelInfo(BaseModel):
+    name: str
+    display_name: str
+    provider: str
+    description: str
+    is_current: bool
+    is_available: bool
+
 class ServerStatus(BaseModel):
     status: str
-    model_loaded: bool
+    current_model: Optional[str]
+    available_models: List[ModelInfo]
     tools_count: int
     available_tools: List[ToolInfo]
     session_count: int
+
+class SwitchModelRequest(BaseModel):
+    name: str
 
 class SessionInfo(BaseModel):
     session_id: str
@@ -151,8 +166,12 @@ async def process_streaming_response(messages: List, request_id: str, session_id
     server_logger.info(f"[{request_id}] 开始流式响应处理")
     
     try:
-        # 绑定工具的模型
-        tool_chat = chat_llm.bind_tools(tools)
+        # 获取当前模型并绑定工具
+        current_model = model_manager.get_current_model()
+        if not current_model:
+            raise Exception("没有可用的模型")
+        
+        tool_chat = current_model.bind_tools(tools)
         conversation_round = 0
         
         while True:
@@ -256,7 +275,7 @@ async def chat_page():
 @app.get("/status", response_model=ServerStatus)
 async def get_status():
     """获取服务器状态"""
-    global chat_llm, tool_map, tools
+    global tool_map, tools
     
     tool_descriptions = get_tool_descriptions()
     available_tools = [
@@ -266,9 +285,27 @@ async def get_status():
     
     sessions = session_manager.list_sessions(limit=1000)
     
+    # 获取模型信息
+    available_models_data = model_manager.get_available_models()
+    available_models = [
+        ModelInfo(
+            name=model["name"],
+            display_name=model["display_name"],
+            provider=model["provider"],
+            description=model["description"],
+            is_current=model["is_current"],
+            is_available=True  # 已经过筛选
+        )
+        for model in available_models_data
+    ]
+    
+    current_config = model_manager.get_current_config()
+    current_model_name = current_config.name if current_config else None
+    
     return ServerStatus(
         status="running",
-        model_loaded=chat_llm is not None,
+        current_model=current_model_name,
+        available_models=available_models,
         tools_count=len(tools) if tools else 0,
         available_tools=available_tools,
         session_count=len(sessions)
@@ -277,11 +314,13 @@ async def get_status():
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     """聊天端点"""
-    if not chat_llm:
-        raise HTTPException(status_code=503, detail="聊天模型未初始化")
+    current_model = model_manager.get_current_model()
+    if not current_model:
+        raise HTTPException(status_code=503, detail="没有可用的聊天模型，请先选择模型")
     
     request_id = f"req_{id(request)}"
-    server_logger.info(f"[{request_id}] 收到聊天请求，会话ID: {request.session_id}")
+    current_config = model_manager.get_current_config()
+    server_logger.info(f"[{request_id}] 收到聊天请求，使用模型: {current_config.display_name}，会话ID: {request.session_id}")
     
     try:
         # 处理会话
@@ -310,13 +349,14 @@ async def chat_endpoint(request: ChatRequest):
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
                     "Content-Type": "text/plain; charset=utf-8",
-                    "X-Session-ID": session_id or ""
+                    "X-Session-ID": session_id or "",
+                    "X-Model-Name": current_config.name
                 }
             )
         else:
             # 非流式响应
             server_logger.info(f"[{request_id}] 非流式响应")
-            tool_chat = chat_llm.bind_tools(tools)
+            tool_chat = current_model.bind_tools(tools)
             result = tool_chat.invoke(messages)
             
             # 保存助手响应到会话
